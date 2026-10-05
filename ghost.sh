@@ -3,7 +3,7 @@
 # ==========================================
 # GHOST
 # Disk Space Investigator
-# Version 0.4
+# Version 0.5
 # ==========================================
 
 set -u
@@ -228,7 +228,7 @@ detect_ghosts() {
         "Inspect before removing anything."
 
     detect_ghost \
-        "Flatpak / Application Data" \
+        "Application Storage" \
         "$VAR_DIR" \
         "Application storage" \
         "REVIEW" \
@@ -237,6 +237,66 @@ detect_ghosts() {
     echo "------------------------------------------"
     echo
     echo "Ghost detection complete."
+    echo
+}
+
+# ==========================================
+# DIRECTORY INSPECTOR
+# ==========================================
+
+inspect_directory() {
+    local directory="$1"
+
+    # Expand "~" manually if supplied.
+    if [[ "$directory" == "~" ]]; then
+        directory="$HOME"
+    elif [[ "$directory" == "~/"* ]]; then
+        directory="$HOME/${directory#~/}"
+    fi
+
+    # Convert relative paths to absolute paths.
+    if [[ "$directory" != /* ]]; then
+        directory="$(realpath "$directory" 2>/dev/null || echo "$directory")"
+    fi
+
+    if [[ ! -d "$directory" ]]; then
+        echo
+        echo "Error: directory does not exist."
+        echo "Path: $directory"
+        echo
+        exit 1
+    fi
+
+    show_header
+
+    echo "DIRECTORY INSPECTOR"
+    echo "------------------------------------------"
+    echo
+    echo "Path:"
+    echo "  $directory"
+    echo
+
+    local total_size
+    total_size=$(get_directory_size "$directory")
+
+    echo "Total size:"
+    echo "  $(format_bytes "$total_size")"
+    echo
+
+    echo "CONTENTS"
+    echo "------------------------------------------"
+    echo
+
+    printf "%-15s %s\n" "SIZE" "PATH"
+    printf "%-15s %s\n" "----" "----"
+
+    du -sB1 "$directory"/* "$directory"/.[!.]* "$directory"/..?* 2>/dev/null |
+        sort -nr |
+        head -n 15 |
+        while read -r size path; do
+            printf "%-15s %s\n" "$(format_bytes "$size")" "$path"
+        done
+
     echo
 }
 
@@ -262,10 +322,11 @@ show_help() {
     echo
 
     echo "Commands:"
-    echo "  scan       Scan disk usage"
-    echo "  large      Find files larger than 500 MB"
-    echo "  ghosts     Detect storage ghosts"
-    echo "  help       Show this help message"
+    echo "  scan              Scan disk usage"
+    echo "  large             Find files larger than 500 MB"
+    echo "  ghosts            Detect storage ghosts"
+    echo "  inspect <path>    Inspect a directory"
+    echo "  help              Show this help message"
     echo
 }
 
@@ -285,6 +346,20 @@ case "${1:-help}" in
 
     ghosts)
         detect_ghosts
+        ;;
+
+    inspect)
+        if [[ -z "${2:-}" ]]; then
+            echo
+            echo "Error: inspect requires a directory."
+            echo
+            echo "Example:"
+            echo "  ./ghost.sh inspect ~/.cache"
+            echo
+            exit 1
+        fi
+
+        inspect_directory "$2"
         ;;
 
     help)
