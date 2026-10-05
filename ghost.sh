@@ -3,7 +3,7 @@
 # ==========================================
 # GHOST
 # Disk Space Investigator
-# Version 0.6
+# Version 0.7
 # ==========================================
 
 set -u
@@ -18,6 +18,14 @@ DOWNLOADS_DIR="$HOME/Downloads"
 VAR_DIR="$HOME/.var"
 LOCAL_DIR="$HOME/.local"
 DOCKER_DIR="$HOME/.docker"
+
+# Duplicate detection threshold.
+# Files smaller than this are ignored by default.
+DUPLICATE_MIN_SIZE_BYTES=$((10 * 1024 * 1024))
+
+# Generated data that should not normally
+# be treated as useful duplicate candidates.
+TRASH_DIR="$HOME/.local/share/Trash"
 
 # ==========================================
 # HEADER
@@ -333,6 +341,231 @@ inspect_directory() {
 }
 
 # ==========================================
+# DUPLICATE FILE INVESTIGATOR
+# ==========================================
+
+find_duplicates() {
+
+    show_header
+
+    echo "DUPLICATE FILE INVESTIGATOR"
+    echo "------------------------------------------"
+    echo
+    echo "Scanning: $HOME"
+    echo "Minimum file size: $(format_bytes "$DUPLICATE_MIN_SIZE_BYTES")"
+    echo
+    echo "Ghost will first group files by size,"
+    echo "then hash only matching candidates."
+    echo
+
+    local temp_dir
+
+    temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghost-duplicates.XXXXXX" 2>/dev/null)
+
+    if [[ -z "$temp_dir" || ! -d "$temp_dir" ]]; then
+        echo "Error: could not create temporary workspace."
+        echo
+        return 1
+    fi
+
+    # Ensure temporary data is removed if the script exits unexpectedly.
+    trap 'rm -rf "$temp_dir"' EXIT
+
+    local scanned_files=0
+    local hash_candidates=0
+    local duplicate_groups=0
+    local duplicate_bytes=0
+
+    declare -A size_count
+
+    # ======================================
+    # PHASE 1
+    # ======================================
+
+    echo "PHASE 1: SIZE ANALYSIS"
+    echo "------------------------------------------"
+    echo
+
+    while IFS= read -r -d '' file; do
+
+        local size
+
+        size=$(stat -c '%s' "$file" 2>/dev/null)
+
+        if [[ -z "$size" ]]; then
+            continue
+        fi
+
+        ((scanned_files++))
+
+        local group_file
+        group_file="$temp_dir/$size"
+
+        if [[ ! -f "$group_file" ]]; then
+            : > "$group_file"
+        fi
+
+        printf '%s\0' "$file" >> "$group_file"
+
+        local current_count
+        current_count="${size_count[$size]:-0}"
+
+        size_count["$size"]=$((current_count + 1))
+
+    done < <(
+        find "$HOME" \
+            -path "$CACHE_DIR" -prune -o \
+            -path "$DOCKER_DIR" -prune -o \
+            -path "$TRASH_DIR" -prune -o \
+            -type f \
+            -size +"${DUPLICATE_MIN_SIZE_BYTES}"c \
+            -print0 \
+            2>/dev/null
+    )
+
+    echo "Files scanned: $scanned_files"
+    echo
+
+    # ======================================
+    # PHASE 2
+    # ======================================
+
+    echo "PHASE 2: HASH ANALYSIS"
+    echo "------------------------------------------"
+    echo
+
+    if (( scanned_files == 0 )); then
+        echo "No files matched the duplicate scan criteria."
+        echo
+        trap - EXIT
+        rm -rf "$temp_dir"
+        return
+    fi
+
+    while IFS= read -r size; do
+
+        local count
+        count="${size_count[$size]:-0}"
+
+        # A size appearing once cannot have duplicates.
+        if (( count < 2 )); then
+            continue
+        fi
+
+        hash_candidates=$((hash_candidates + count))
+
+        declare -A hash_first=()
+        declare -A hash_count=()
+
+        while IFS= read -r -d '' file; do
+
+            local hash
+
+            hash=$(sha256sum -- "$file" 2>/dev/null | awk '{print $1}')
+
+            if [[ -z "$hash" ]]; then
+                continue
+            fi
+
+            if [[ -z "${hash_first[$hash]+exists}" ]]; then
+
+                hash_first["$hash"]="$file"
+                hash_count["$hash"]=1
+
+            else
+
+                local first_file
+                first_file="${hash_first[$hash]}"
+
+                # Confirm byte-for-byte equality after matching hash.
+                if cmp -s -- "$first_file" "$file"; then
+
+                    local existing_count
+                    existing_count="${hash_count[$hash]:-1}"
+
+                    if (( existing_count == 1 )); then
+
+                        ((duplicate_groups++))
+
+                        echo "DUPLICATE GROUP #$duplicate_groups"
+                        echo "------------------------------------------"
+                        echo
+                        echo "Hash:"
+                        echo "  $hash"
+                        echo
+                        echo "File size:"
+                        echo "  $(format_bytes "$size")"
+                        echo
+                        echo "Files:"
+                        echo "  1. $first_file"
+                        echo "  2. $file"
+
+                    else
+
+                        echo "  $((existing_count + 1)). $file"
+
+                    fi
+
+                    hash_count["$hash"]=$((existing_count + 1))
+
+                    # Every additional identical copy is potentially
+                    # recoverable space.
+                    duplicate_bytes=$((duplicate_bytes + size))
+
+                    echo
+
+                fi
+
+            fi
+
+        done < "$temp_dir/$size"
+
+        unset hash_first
+        unset hash_count
+
+    done < <(
+        printf '%s\n' "${!size_count[@]}" |
+        sort -nr
+    )
+
+    # ======================================
+    # RESULTS
+    # ======================================
+
+    echo "=========================================="
+    echo
+    echo "DUPLICATE ANALYSIS COMPLETE"
+    echo "------------------------------------------"
+    echo
+
+    echo "Files scanned:          $scanned_files"
+    echo "Same-size candidates:   $hash_candidates"
+    echo "Duplicate groups:       $duplicate_groups"
+    echo
+
+    if (( duplicate_bytes > 0 )); then
+
+        echo "Potential recovery:"
+        echo "  $(format_bytes "$duplicate_bytes")"
+        echo
+
+        echo "IMPORTANT:"
+        echo "Ghost has not deleted anything."
+        echo "Review duplicate groups before cleanup."
+        echo
+
+    else
+
+        echo "No confirmed duplicate files were found."
+        echo
+
+    fi
+
+    trap - EXIT
+    rm -rf "$temp_dir"
+}
+
+# ==========================================
 # ANALYSIS HELPERS
 # ==========================================
 
@@ -538,6 +771,7 @@ analyze() {
     echo
 
     analyze_cache
+
     local cache_candidates
     cache_candidates=$(get_cache_candidate_size)
 
@@ -647,6 +881,7 @@ show_help() {
     echo "  large             Find files larger than 500 MB"
     echo "  ghosts            Detect storage ghosts"
     echo "  inspect <path>    Inspect a directory"
+    echo "  duplicates        Find confirmed duplicate files"
     echo "  analyze           Analyze storage and give recommendations"
     echo "  help              Show this help message"
     echo
@@ -682,6 +917,10 @@ case "${1:-help}" in
         fi
 
         inspect_directory "$2"
+        ;;
+
+    duplicates)
+        find_duplicates
         ;;
 
     analyze)
