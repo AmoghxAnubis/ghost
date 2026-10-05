@@ -3,7 +3,7 @@
 # ==========================================
 # GHOST
 # Disk Space Investigator
-# Version 0.7
+# Version 0.8
 # ==========================================
 
 set -u
@@ -20,8 +20,11 @@ LOCAL_DIR="$HOME/.local"
 DOCKER_DIR="$HOME/.docker"
 
 # Duplicate detection threshold.
-# Files smaller than this are ignored by default.
 DUPLICATE_MIN_SIZE_BYTES=$((10 * 1024 * 1024))
+
+# Age analysis threshold.
+AGE_MIN_SIZE_BYTES=$((10 * 1024 * 1024))
+AGE_THRESHOLD_DAYS=30
 
 # Generated data that should not normally
 # be treated as useful duplicate candidates.
@@ -70,6 +73,26 @@ get_directory_size() {
     fi
 
     du -sB1 "$directory" 2>/dev/null | awk '{print $1}'
+}
+
+# ==========================================
+# PATH RESOLUTION
+# ==========================================
+
+resolve_path() {
+    local path="$1"
+
+    if [[ "$path" == "~" ]]; then
+        path="$HOME"
+    elif [[ "$path" == "~/"* ]]; then
+        path="$HOME/${path#~/}"
+    fi
+
+    if [[ "$path" != /* ]]; then
+        path="$(realpath "$path" 2>/dev/null || echo "$path")"
+    fi
+
+    echo "$path"
 }
 
 # ==========================================
@@ -287,17 +310,9 @@ detect_ghosts() {
 # ==========================================
 
 inspect_directory() {
-    local directory="$1"
+    local directory
 
-    if [[ "$directory" == "~" ]]; then
-        directory="$HOME"
-    elif [[ "$directory" == "~/"* ]]; then
-        directory="$HOME/${directory#~/}"
-    fi
-
-    if [[ "$directory" != /* ]]; then
-        directory="$(realpath "$directory" 2>/dev/null || echo "$directory")"
-    fi
+    directory=$(resolve_path "$1")
 
     if [[ ! -d "$directory" ]]; then
         echo
@@ -368,7 +383,6 @@ find_duplicates() {
         return 1
     fi
 
-    # Ensure temporary data is removed if the script exits unexpectedly.
     trap 'rm -rf "$temp_dir"' EXIT
 
     local scanned_files=0
@@ -447,7 +461,6 @@ find_duplicates() {
         local count
         count="${size_count[$size]:-0}"
 
-        # A size appearing once cannot have duplicates.
         if (( count < 2 )); then
             continue
         fi
@@ -477,7 +490,6 @@ find_duplicates() {
                 local first_file
                 first_file="${hash_first[$hash]}"
 
-                # Confirm byte-for-byte equality after matching hash.
                 if cmp -s -- "$first_file" "$file"; then
 
                     local existing_count
@@ -508,8 +520,6 @@ find_duplicates() {
 
                     hash_count["$hash"]=$((existing_count + 1))
 
-                    # Every additional identical copy is potentially
-                    # recoverable space.
                     duplicate_bytes=$((duplicate_bytes + size))
 
                     echo
@@ -534,6 +544,7 @@ find_duplicates() {
 
     echo "=========================================="
     echo
+
     echo "DUPLICATE ANALYSIS COMPLETE"
     echo "------------------------------------------"
     echo
@@ -608,6 +619,234 @@ get_download_candidates() {
         \) \
         -printf '%s\n' 2>/dev/null |
         awk '{sum += $1} END {print sum+0}'
+}
+
+# ==========================================
+# AGE ANALYSIS HELPERS
+# ==========================================
+
+get_old_file_size() {
+    local directory="$1"
+    local days="$2"
+
+    if [[ ! -d "$directory" ]]; then
+        echo "0"
+        return
+    fi
+
+    find "$directory" \
+        -path "$CACHE_DIR" -prune -o \
+        -path "$DOCKER_DIR" -prune -o \
+        -path "$TRASH_DIR" -prune -o \
+        -type f \
+        -size +"${AGE_MIN_SIZE_BYTES}"c \
+        -mtime +"$days" \
+        -printf '%s\n' \
+        2>/dev/null |
+        awk '{sum += $1} END {print sum+0}'
+}
+
+get_old_file_count() {
+    local directory="$1"
+    local days="$2"
+
+    if [[ ! -d "$directory" ]]; then
+        echo "0"
+        return
+    fi
+
+    find "$directory" \
+        -path "$CACHE_DIR" -prune -o \
+        -path "$DOCKER_DIR" -prune -o \
+        -path "$TRASH_DIR" -prune -o \
+        -type f \
+        -size +"${AGE_MIN_SIZE_BYTES}"c \
+        -mtime +"$days" \
+        -print \
+        2>/dev/null |
+        wc -l
+}
+
+get_file_category() {
+    local file="$1"
+
+    if [[ "$file" == "$DOWNLOADS_DIR/"* ]]; then
+        echo "Downloads"
+    elif [[ "$file" == "$VAR_DIR/"* ]]; then
+        echo "Application Data"
+    elif [[ "$file" == "$LOCAL_DIR/"* ]]; then
+        echo "Application Data"
+    elif [[ "$file" == "$CACHE_DIR/"* ]]; then
+        echo "Cache"
+    elif [[ "$file" == "$DOCKER_DIR/"* ]]; then
+        echo "Docker"
+    elif [[ "$file" == "$HOME/.config/"* ]]; then
+        echo "Configuration"
+    else
+        echo "User File"
+    fi
+}
+
+# ==========================================
+# OLD FILE INVESTIGATOR
+# ==========================================
+
+find_old_files() {
+
+    local directory="$1"
+
+    directory=$(resolve_path "$directory")
+
+    if [[ ! -d "$directory" ]]; then
+        echo
+        echo "Error: directory does not exist."
+        echo "Path: $directory"
+        echo
+        return 1
+    fi
+
+    show_header
+
+    echo "AGE ANALYSIS"
+    echo "------------------------------------------"
+    echo
+    echo "Scanning: $directory"
+    echo "Minimum file size: $(format_bytes "$AGE_MIN_SIZE_BYTES")"
+    echo "Age threshold:      $AGE_THRESHOLD_DAYS days"
+    echo
+    echo "Ghost excludes cache, Docker and Trash data"
+    echo "from the age investigation."
+    echo
+
+    local old_size
+    local old_count
+    local very_old_size
+    local very_old_count
+    local stale_size
+    local stale_count
+
+    old_size=$(get_old_file_size "$directory" 30)
+    old_count=$(get_old_file_count "$directory" 30)
+
+    very_old_size=$(get_old_file_size "$directory" 90)
+    very_old_count=$(get_old_file_count "$directory" 90)
+
+    stale_size=$(get_old_file_size "$directory" 180)
+    stale_count=$(get_old_file_count "$directory" 180)
+
+    echo "AGE SUMMARY"
+    echo "------------------------------------------"
+    echo
+
+    echo "Older than 30 days:"
+    echo "  Files:       $old_count"
+    echo "  Storage:     $(format_bytes "$old_size")"
+    echo
+
+    echo "Older than 90 days:"
+    echo "  Files:       $very_old_count"
+    echo "  Storage:     $(format_bytes "$very_old_size")"
+    echo
+
+    echo "Older than 180 days:"
+    echo "  Files:       $stale_count"
+    echo "  Storage:     $(format_bytes "$stale_size")"
+    echo
+
+    echo "OLDEST LARGE FILES"
+    echo "------------------------------------------"
+    echo
+
+    printf "%-10s %-15s %-20s %s\n" \
+        "AGE" \
+        "SIZE" \
+        "CATEGORY" \
+        "FILE"
+
+    printf "%-10s %-15s %-20s %s\n" \
+        "---" \
+        "----" \
+        "--------" \
+        "----"
+
+    local now
+    now=$(date +%s)
+
+    local found_files=0
+
+    while IFS=$'\t' read -r mtime size file; do
+
+        if [[ -z "$file" ]]; then
+            continue
+        fi
+
+        local mtime_int
+        mtime_int="${mtime%.*}"
+
+        local age_seconds
+        age_seconds=$((now - mtime_int))
+
+        if (( age_seconds < 0 )); then
+            age_seconds=0
+        fi
+
+        local age_days
+        age_days=$((age_seconds / 86400))
+
+        local category
+        category=$(get_file_category "$file")
+
+        printf "%-10s %-15s %-20s %s\n" \
+            "${age_days}d" \
+            "$(format_bytes "$size")" \
+            "$category" \
+            "$file"
+
+        ((found_files++))
+
+    done < <(
+        find "$directory" \
+            -path "$CACHE_DIR" -prune -o \
+            -path "$DOCKER_DIR" -prune -o \
+            -path "$TRASH_DIR" -prune -o \
+            -type f \
+            -size +"${AGE_MIN_SIZE_BYTES}"c \
+            -mtime +"$AGE_THRESHOLD_DAYS" \
+            -printf '%T@\t%s\t%p\n' \
+            2>/dev/null |
+        sort -t $'\t' -k2,2nr |
+        head -n 20
+    )
+
+    echo
+
+    if (( found_files == 0 )); then
+        echo "No large files older than $AGE_THRESHOLD_DAYS days were found."
+        echo
+        return
+    fi
+
+    echo "AGE INTERPRETATION"
+    echo "------------------------------------------"
+    echo
+
+    if (( stale_size > 0 )); then
+        echo "Strong review candidates were found."
+        echo "$(format_bytes "$stale_size") belongs to files older than 180 days."
+    elif (( very_old_size > 0 )); then
+        echo "Several files are substantially old."
+        echo "$(format_bytes "$very_old_size") belongs to files older than 90 days."
+    else
+        echo "Older files exist, but none exceed 90 days."
+        echo "Review them based on their location and purpose."
+    fi
+
+    echo
+    echo "IMPORTANT:"
+    echo "Age alone does not mean a file is safe to delete."
+    echo "Ghost will use age as evidence, not as an automatic"
+    echo "deletion decision."
+    echo
 }
 
 # ==========================================
@@ -776,6 +1015,62 @@ analyze() {
     cache_candidates=$(get_cache_candidate_size)
 
     # --------------------------------------
+    # Age evidence
+    # --------------------------------------
+
+    echo "AGE EVIDENCE"
+    echo "------------------------------------------"
+    echo
+
+    local old_download_size=0
+    local old_download_count=0
+    local very_old_download_size=0
+    local very_old_download_count=0
+    local stale_download_size=0
+    local stale_download_count=0
+
+    old_download_size=$(get_old_file_size "$DOWNLOADS_DIR" 30)
+    old_download_count=$(get_old_file_count "$DOWNLOADS_DIR" 30)
+
+    very_old_download_size=$(get_old_file_size "$DOWNLOADS_DIR" 90)
+    very_old_download_count=$(get_old_file_count "$DOWNLOADS_DIR" 90)
+
+    stale_download_size=$(get_old_file_size "$DOWNLOADS_DIR" 180)
+    stale_download_count=$(get_old_file_count "$DOWNLOADS_DIR" 180)
+
+    if (( old_download_count > 0 )); then
+
+        echo "Downloads older than 30 days:"
+        echo "  Files:       $old_download_count"
+        echo "  Storage:     $(format_bytes "$old_download_size")"
+        echo
+
+    else
+
+        echo "No large Downloads files older than 30 days were found."
+        echo
+
+    fi
+
+    if (( very_old_download_count > 0 )); then
+
+        echo "Downloads older than 90 days:"
+        echo "  Files:       $very_old_download_count"
+        echo "  Storage:     $(format_bytes "$very_old_download_size")"
+        echo
+
+    fi
+
+    if (( stale_download_count > 0 )); then
+
+        echo "Downloads older than 180 days:"
+        echo "  Files:       $stale_download_count"
+        echo "  Storage:     $(format_bytes "$stale_download_size")"
+        echo
+
+    fi
+
+    # --------------------------------------
     # Review required
     # --------------------------------------
 
@@ -831,25 +1126,60 @@ analyze() {
 
     echo "Known storage consumers:  $(format_bytes "$known_consumers")"
     echo "Cache candidates:        $(format_bytes "$cache_candidates")"
-    echo "Storage Health:          $health"
+    echo "Old Downloads (30d+):    $(format_bytes "$old_download_size")"
+    echo "Storage Health:           $health"
     echo
+
+    # --------------------------------------
+    # Recommendation
+    # --------------------------------------
 
     echo "RECOMMENDATION"
     echo "------------------------------------------"
     echo
 
     if (( usage >= 85 )); then
+
         echo "Your disk is under significant storage pressure."
         echo "Investigate Docker, Downloads and cache candidates."
+
     elif (( usage >= 70 )); then
+
         echo "Your disk has moderate storage pressure."
         echo "Review the largest storage consumers before they grow."
+
     else
+
         echo "Your disk is not currently under storage pressure."
-        echo "The largest investigation targets are:"
-        echo "  1. Docker storage"
-        echo "  2. Downloads"
-        echo "  3. Application caches"
+        echo
+
+        if (( stale_download_size > 0 )); then
+
+            echo "Ghost found significantly aged files in Downloads."
+            echo "$(format_bytes "$stale_download_size") is older than 180 days."
+            echo "Review those files before considering cleanup."
+
+        elif (( very_old_download_size > 0 )); then
+
+            echo "Ghost found older files in Downloads."
+            echo "$(format_bytes "$very_old_download_size") is older than 90 days."
+            echo "Review those files before considering cleanup."
+
+        elif (( old_download_size > 0 )); then
+
+            echo "Ghost found older files in Downloads."
+            echo "$(format_bytes "$old_download_size") is older than 30 days."
+            echo "Review installers and archives before cleanup."
+
+        else
+
+            echo "The largest investigation targets are:"
+            echo "  1. Docker storage"
+            echo "  2. Downloads"
+            echo "  3. Application caches"
+
+        fi
+
     fi
 
     echo
@@ -882,6 +1212,7 @@ show_help() {
     echo "  ghosts            Detect storage ghosts"
     echo "  inspect <path>    Inspect a directory"
     echo "  duplicates        Find confirmed duplicate files"
+    echo "  age [path]        Find large files older than 30 days"
     echo "  analyze           Analyze storage and give recommendations"
     echo "  help              Show this help message"
     echo
@@ -921,6 +1252,16 @@ case "${1:-help}" in
 
     duplicates)
         find_duplicates
+        ;;
+
+    age)
+
+        if [[ -n "${2:-}" ]]; then
+            find_old_files "$2"
+        else
+            find_old_files "$DOWNLOADS_DIR"
+        fi
+
         ;;
 
     analyze)
