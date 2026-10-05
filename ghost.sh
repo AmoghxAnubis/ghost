@@ -3,10 +3,25 @@
 # ==========================================
 # GHOST
 # Disk Space Investigator
-# Version 0.2
+# Version 0.4
 # ==========================================
 
 set -u
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+
+CACHE_DIR="$HOME/.cache"
+NPM_DIR="$HOME/.npm"
+DOWNLOADS_DIR="$HOME/Downloads"
+VAR_DIR="$HOME/.var"
+LOCAL_DIR="$HOME/.local"
+DOCKER_DIR="$HOME/.docker"
+
+# ==========================================
+# HEADER
+# ==========================================
 
 show_header() {
     echo
@@ -15,6 +30,43 @@ show_header() {
     echo "=========================================="
     echo
 }
+
+# ==========================================
+# FORMAT BYTES
+# ==========================================
+
+format_bytes() {
+    local bytes="$1"
+
+    if (( bytes >= 1073741824 )); then
+        awk "BEGIN {printf \"%.2f GB\", $bytes / 1073741824}"
+    elif (( bytes >= 1048576 )); then
+        awk "BEGIN {printf \"%.2f MB\", $bytes / 1048576}"
+    elif (( bytes >= 1024 )); then
+        awk "BEGIN {printf \"%.2f KB\", $bytes / 1024}"
+    else
+        echo "${bytes} B"
+    fi
+}
+
+# ==========================================
+# GET DIRECTORY SIZE
+# ==========================================
+
+get_directory_size() {
+    local directory="$1"
+
+    if [[ ! -d "$directory" ]]; then
+        echo "0"
+        return
+    fi
+
+    du -sB1 "$directory" 2>/dev/null | awk '{print $1}'
+}
+
+# ==========================================
+# DISK USAGE
+# ==========================================
 
 show_disk_usage() {
     echo "SYSTEM STORAGE"
@@ -31,6 +83,10 @@ show_disk_usage() {
     echo
 }
 
+# ==========================================
+# TOP DIRECTORIES
+# ==========================================
+
 show_top_directories() {
     echo "TOP DIRECTORIES"
     echo "------------------------------------------"
@@ -43,6 +99,10 @@ show_top_directories() {
     echo
 }
 
+# ==========================================
+# LARGE FILE INVESTIGATOR
+# ==========================================
+
 find_large_files() {
     show_header
 
@@ -53,45 +113,146 @@ find_large_files() {
     echo "Looking for files larger than 500 MB..."
     echo
 
-    results=$(
+    files=$(
         find "$HOME" \
             -type f \
             -size +500M \
-            -printf '%s %p\n' \
-            2>/dev/null |
-            sort -nr |
-            head -n 15
+            -printf '%p\n' \
+            2>/dev/null
     )
 
-    if [[ -z "$results" ]]; then
+    if [[ -z "$files" ]]; then
         echo "No files larger than 500 MB were found."
         echo
         return
     fi
 
-    echo "$results" |
-        awk '{
-            size = $1
-            $1 = ""
-            file = substr($0, 2)
+    printf "%-15s %-15s %s\n" "ACTUAL" "LOGICAL" "FILE"
+    printf "%-15s %-15s %s\n" "------" "-------" "----"
 
-            if (size >= 1073741824) {
-                printf "%6.2f GB    %s\n",
-                    size / 1073741824, file
-            } else {
-                printf "%6.2f MB    %s\n",
-                    size / 1048576, file
-            }
-        }'
+    while IFS= read -r file; do
+
+        logical=$(stat -c '%s' "$file" 2>/dev/null)
+        actual=$(du -B1 "$file" 2>/dev/null | awk '{print $1}')
+
+        if [[ -z "$logical" || -z "$actual" ]]; then
+            continue
+        fi
+
+        logical_display=$(format_bytes "$logical")
+        actual_display=$(format_bytes "$actual")
+
+        printf "%-15s %-15s %s\n" \
+            "$actual_display" \
+            "$logical_display" \
+            "$file"
+
+    done <<< "$files"
 
     echo
 }
+
+# ==========================================
+# GHOST DETECTION
+# ==========================================
+
+detect_ghost() {
+    local name="$1"
+    local path="$2"
+    local type="$3"
+    local risk="$4"
+    local recommendation="$5"
+
+    if [[ ! -d "$path" ]]; then
+        return
+    fi
+
+    local size
+    size=$(get_directory_size "$path")
+
+    if [[ "$size" == "0" ]]; then
+        return
+    fi
+
+    echo "👻 $name"
+    echo "   Location:       $path"
+    echo "   Size:           $(format_bytes "$size")"
+    echo "   Type:           $type"
+    echo "   Risk:           $risk"
+    echo "   Recommendation: $recommendation"
+    echo
+}
+
+detect_ghosts() {
+    show_header
+
+    echo "GHOST DETECTION"
+    echo "------------------------------------------"
+    echo
+    echo "Searching for known storage consumers..."
+    echo
+
+    detect_ghost \
+        "Docker Storage" \
+        "$DOCKER_DIR" \
+        "Development environment" \
+        "REVIEW" \
+        "Inspect unused Docker images, containers and volumes."
+
+    detect_ghost \
+        "Downloads" \
+        "$DOWNLOADS_DIR" \
+        "User files" \
+        "REVIEW" \
+        "Check old installers, archives and unused downloads."
+
+    detect_ghost \
+        "Application Cache" \
+        "$CACHE_DIR" \
+        "Application cache" \
+        "LOW" \
+        "Cache data can usually be regenerated by applications."
+
+    detect_ghost \
+        "NPM Cache" \
+        "$NPM_DIR" \
+        "Package manager cache" \
+        "LOW" \
+        "Unused npm cache can usually be regenerated."
+
+    detect_ghost \
+        "User Data" \
+        "$LOCAL_DIR" \
+        "Application data" \
+        "REVIEW" \
+        "Inspect before removing anything."
+
+    detect_ghost \
+        "Flatpak / Application Data" \
+        "$VAR_DIR" \
+        "Application storage" \
+        "REVIEW" \
+        "Inspect installed applications and their data."
+
+    echo "------------------------------------------"
+    echo
+    echo "Ghost detection complete."
+    echo
+}
+
+# ==========================================
+# FULL SYSTEM SCAN
+# ==========================================
 
 scan() {
     show_header
     show_disk_usage
     show_top_directories
 }
+
+# ==========================================
+# HELP
+# ==========================================
 
 show_help() {
     show_header
@@ -103,17 +264,27 @@ show_help() {
     echo "Commands:"
     echo "  scan       Scan disk usage"
     echo "  large      Find files larger than 500 MB"
+    echo "  ghosts     Detect storage ghosts"
     echo "  help       Show this help message"
     echo
 }
 
+# ==========================================
+# COMMAND ROUTER
+# ==========================================
+
 case "${1:-help}" in
+
     scan)
         scan
         ;;
 
     large)
         find_large_files
+        ;;
+
+    ghosts)
+        detect_ghosts
         ;;
 
     help)
@@ -127,4 +298,5 @@ case "${1:-help}" in
         echo
         exit 1
         ;;
+
 esac
