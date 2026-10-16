@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Ghost
 
 **Understand where your Linux storage went, why it is there, and what deserves review before cleanup.**
@@ -79,7 +78,7 @@ The included GitHub Actions workflow runs the same checks on Linux after a push 
 The next product layer is a reviewable cleanup plan with exact targets, reasons, application-aware operations, and revalidation. Explicit approval, matching dry-run behavior, and measured before/after recovery come after trustworthy classification. Docker-native evidence, local growth history, installation, and TUI polish follow that foundation.
 
 See [the sprint plan](SPRINT-01.md) for the implementation scope and acceptance criteria.
-=======
+## Original project notes
+
 we are just getting started with this , shipping product soon
 i dont know how far this will go
->>>>>>> e296a239e6afe3b0af28496fdc9f68110e7cecf1
