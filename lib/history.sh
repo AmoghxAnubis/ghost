@@ -25,7 +25,7 @@ history_cleanup() {
 history_setup() {
     local action="$1" state_root="${XDG_STATE_HOME:-$STORAGE_HOME/.local/state}" tool
     diagnosis_requirements || return 1
-    for tool in chmod mkdir mv; do
+    for tool in mkdir mv; do
         command -v "$tool" >/dev/null 2>&1 || { printf 'Error: history requires %s.\n' "$tool" >&2; return 1; }
     done
     if [[ "$state_root" != /* ]]; then
@@ -69,7 +69,8 @@ history_exclusion() {
 }
 
 history_collect() {
-    local index path measurement bytes blocks device failed
+    local index path measurement bytes blocks device failed file_device inode key
+    local -A download_seen=()
     history_exclusion
     for ((index=0; index<${#storage_source_ids[@]}; index++)); do
         path="${storage_source_paths[$index]}"
@@ -87,13 +88,24 @@ history_collect() {
         if [[ "${storage_source_kinds[$index]}" == downloads ]]; then
             # No personal filenames are retained, even in the scratch records.
             if ! LC_ALL=C find "$path" -xdev -mindepth 1 -maxdepth 1 -type f \
-                -size +"${AGE_MIN_SIZE_BYTES}"c -printf '%b\0' \
+                -size +"${AGE_MIN_SIZE_BYTES}"c -printf '%D\0%i\0%b\0' \
                 > "$diagnosis_workspace/blocks" 2> "$diagnosis_workspace/errors"; then
                 continue
             fi
             bytes=0
             failed=0
-            while IFS= read -r -d '' blocks; do
+            while IFS= read -r -d '' file_device; do
+                if ! IFS= read -r -d '' inode || ! IFS= read -r -d '' blocks; then
+                    failed=1
+                    break
+                fi
+                if [[ ! "$file_device" =~ ^[0-9]+$ || ! "$inode" =~ ^[0-9]+$ ]]; then
+                    failed=1
+                    break
+                fi
+                key="$file_device:$inode"
+                [[ -z "${download_seen[$key]+exists}" ]] || continue
+                download_seen[$key]=1
                 if ! history_uint "$blocks" || (( blocks > 1000000000000000 || bytes > 999999999999999999 - blocks * 512 )); then
                     failed=1
                     break
@@ -153,6 +165,11 @@ history_load_snapshot() {
             echo 'Error: latest snapshot pointer is not private or is a symlink.' >&2
             return 1
         fi
+        size=$(stat -c '%s' -- "$history_dir/latest") || return 1
+        if ! history_uint "$size" || (( size > 128 )); then
+            echo 'Error: invalid latest snapshot pointer size.' >&2
+            return 1
+        fi
         exec {fd}< "$history_dir/latest" || return 1
         IFS= read -r -d '' name <&"$fd" || invalid=1
         extra=''
@@ -179,7 +196,7 @@ history_load_snapshot() {
     done
     if (( invalid == 0 )); then
         if [[ "${header[0]}" != GHOST-SNAPSHOT || "${header[1]}" != 1 || "${header[6]}" != "${#storage_source_ids[@]}" ]] ||
-            ! history_uint "${header[2]}"; then
+            ! history_uint "${header[2]}" || (( header[2] > 253402300799 )); then
             invalid=1
         fi
     fi
@@ -303,7 +320,7 @@ storage_history() (
     history_collect
     if [[ "$action" == snapshot ]]; then
         if ! history_write_snapshot; then
-            echo 'Error: snapshot could not be fully saved; previous baseline was not replaced unless publication completed.' >&2
+            echo 'Error: could not complete snapshot save. Use changes to check the active baseline.' >&2
             return 1
         fi
         for ((index=0; index<${#storage_source_ids[@]}; index++)); do

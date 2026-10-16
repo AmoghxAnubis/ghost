@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 test_dir="${BASH_SOURCE[0]%/*}"
 repo_dir="$(cd -- "$test_dir/.." && pwd)"
@@ -34,6 +35,10 @@ capture changes
 check 'first use explains how to save a baseline' contains "$output" 'No saved baseline.'
 check 'first use is successful' equals "$result" 0
 check 'changes creates no history directory on first use' test ! -e "$LOCAL_DIR"
+capture snapshot unexpected
+check 'snapshot rejects unexpected arguments' equals "$result" 1
+capture changes first second
+check 'changes rejects unexpected arguments' equals "$result" 1
 
 # All known directories exist, so ordinary comparisons have seven useful totals.
 mkdir -p -- "$CACHE_DIR/google-chrome" "$CACHE_DIR/JetBrains" "$NPM_DIR/_cacache" \
@@ -157,10 +162,12 @@ capture changes "$baseline"
 check 'trailing records are rejected' equals "$result" 1
 cp -- "$test_workspace/good-snapshot" "$store/$baseline"
 
-chmod 644 "$store/$baseline"
-capture changes "$baseline"
-check 'publicly readable snapshots are refused' equals "$result" 1
-chmod 600 "$store/$baseline"
+if [[ "$(uname -s)" == Linux ]]; then
+    chmod 644 "$store/$baseline"
+    capture changes "$baseline"
+    check 'publicly readable snapshots are refused' equals "$result" 1
+    chmod 600 "$store/$baseline"
+fi
 capture changes '../outside.ghost'
 check 'snapshot identifiers cannot escape the history directory' equals "$result" 1
 XDG_STATE_HOME=relative capture snapshot
@@ -191,6 +198,9 @@ if [[ "$(uname -s)" == Linux ]]; then
     truncate -s 1G -- "$DOWNLOADS_DIR/large-sparse.iso"
     capture changes "$second"
     check 'real sparse allocation never becomes a logical GiB increase' excludes "$output" '+1.00 GiB'
+    ln -- "$DOWNLOADS_DIR/base.iso" "$DOWNLOADS_DIR/linked.iso"
+    capture changes "$second"
+    check 'hard links are counted once within Downloads' contains "$output" '-12.00 MiB  Downloads'
     mv -- "$CACHE_DIR/google-chrome" "$test_workspace/chrome-original"
     ln -s -- "$DOWNLOADS_DIR" "$CACHE_DIR/google-chrome"
     capture changes "$second"

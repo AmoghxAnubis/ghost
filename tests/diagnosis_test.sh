@@ -167,7 +167,11 @@ for route in scan large ghosts inspect duplicates age analyze snapshot changes h
         snapshot|changes) handler=storage_history ;;
         help) handler=show_help ;;
     esac
-    output=$( (eval "$handler() { printf 'dispatched'; }"; main "$route" "$DOWNLOADS_DIR") )
+    if [[ "$route" == snapshot ]]; then
+        output=$( (eval "$handler() { printf 'dispatched'; }"; main "$route") )
+    else
+        output=$( (eval "$handler() { printf 'dispatched'; }"; main "$route" "$DOWNLOADS_DIR") )
+    fi
     check "existing $route route still dispatches" equals "$output" dispatched
 done
 output=$(main unknown 2>&1) && result=0 || result=$?

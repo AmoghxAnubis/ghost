@@ -18,7 +18,33 @@ The default diagnosis shows filesystem pressure, up to three review priorities r
 
 Requirements: Linux, Bash **4.4+**, GNU coreutils and findutils, and awk. These provide `df`, `du`, `stat`, `realpath`, `sort`, `date`, `mktemp`, `find`, and the utilities used by the deeper investigators. Run as your normal user; root privileges are unnecessary and hide useful permission boundaries.
 
-Ghost currently investigates and reports. It does not execute cleanup or change your files. Diagnosis uses a private temporary workspace, removed when the command exits. Ordinary filesystem access times may change when data is read.
+Ghost investigates and reports without executing cleanup. Diagnosis and `changes` leave user data alone. The explicit `snapshot` command writes Ghost's own private local history. Temporary workspaces are removed when commands exit. Ordinary filesystem access times may change when data is read.
+
+## What grew since last time?
+
+Save a baseline, then compare later:
+
+```bash
+bash ghost.sh snapshot
+# After using your machine for a while:
+bash ghost.sh changes
+```
+
+`changes` compares live storage with the **last saved baseline**. It shows the largest increases and decreases separately, the before/after allocations, and read-only investigation commands. It does not save a new snapshot or move your baseline. Run `snapshot` again when you deliberately want a new baseline; earlier snapshots remain available. To compare against an older snapshot, pass the complete ID printed when it was saved:
+
+```bash
+bash ghost.sh changes "<snapshot-id>"
+```
+
+History follows the seven existing locations: Chrome cache, JetBrains cache, npm cache, `~/.local`, `~/.var`, `~/.docker`, and the combined allocation of top-level Downloads files larger than 10 MiB. Each snapshot records its time, scope, source paths, filesystem identities, allocated bytes, and measurement statuses. **Individual filenames and file contents are not retained.**
+
+History lives in `${XDG_STATE_HOME:-$HOME/.local/state}/ghost`. The state home must be an absolute path. Ghost creates a private directory and files (normally 700/600 on Linux), refuses shared or symlinked history files, and publishes complete records before updating the default baseline. Stored data is parsed as records, never executed as shell code. Snapshots are retained locally until you remove them; there is no background recording or automatic pruning.
+
+Ghost excludes its history directory from historical measurements so saving a baseline does not itself produce growth. Downloads hard links are counted once within that source. Overlapping sources stay separate, with no combined delta or recovery promise. A decrease says only that the measured allocation fell; it does not establish what caused it.
+
+Missing, unreadable, aliased, failed, or changed-filesystem sources are **not comparable**, never zero-byte measurements. Optional sources absent in both scans are labeled without failing the report. A source appearing for the first time needs a baseline before it can have a delta. Snapshots from another home or a different measurement scope are refused. Directory sizes can still take time to collect, and changing files mean these are observations taken during a scan, not a filesystem-wide atomic snapshot.
+
+History exit codes: `0` = snapshot saved/comparison completed (or first-use instructions), `1` = storage, format, permission, or argument error, `2` = incomplete measurements or incompatible scope. An explicitly saved partial snapshot becomes the latest baseline and records the missing evidence; the command prints that limitation and returns 2. You can still choose an older complete snapshot by ID.
 
 ## What the diagnosis covers
 
@@ -52,6 +78,8 @@ bash ghost.sh age                     # Files >10 MiB, modified >30 days ago in 
 bash ghost.sh age /path/to/directory
 bash ghost.sh duplicates              # Size grouping, SHA-256, then byte comparison
 bash ghost.sh help
+bash ghost.sh snapshot                # Save source totals locally, explicitly
+bash ghost.sh changes                 # Live comparison with the last saved snapshot
 ```
 
 The deeper investigators predate the new diagnosis and retain limits: age/large-file output does not fully support filenames containing newlines, most legacy scans suppress some filesystem errors, and duplicate recovery is a **logical-size estimate** that does not account for hard links or sparse allocation. Duplicate confirmation does not establish whether an application needs both copies. These estimates are excluded from the new diagnosis's priorities and no recovery total is inferred.
@@ -65,19 +93,24 @@ Diagnosis exit codes: `0` = completed within its stated scope, `1` = prerequisit
 ```bash
 bash -n ghost.sh
 bash -n lib/diagnosis.sh
+bash -n lib/history.sh
 bash -n tests/diagnosis_test.sh
+bash -n tests/history_test.sh
 bash tests/diagnosis_test.sh
+bash tests/history_test.sh
 ```
 
-The suite creates an isolated fixture root without changing your home setting. It exercises classification, allocated-space ranking, shell quoting, read-only drill-downs, failure reporting, unchanged file contents, and existing command routes. Temporary fixtures are removed afterward. Run on Linux as a non-root user to exercise native symlinks, sparse files, and permission behavior. Git Bash can exercise the portable checks; it cannot validate Linux filesystem semantics.
+The suites create isolated fixture roots without changing your home setting. They exercise classification, allocation ranking, quoted drill-downs, unchanged user data, command routes, growth and shrinkage, missing/failed sources, history exclusion, atomic publication failures, private files, and malformed snapshots. Temporary fixtures are removed afterward. Run on Linux as a non-root user to exercise native hard links, symlinks, sparse files, and permission behavior. Git Bash can exercise the portable checks; it cannot validate Linux filesystem semantics.
 
 The included GitHub Actions workflow runs the same checks on Linux after a push or pull request. Its native filesystem checks must pass before release.
 
 ## Next
 
-The next product layer is a reviewable cleanup plan with exact targets, reasons, application-aware operations, and revalidation. Explicit approval, matching dry-run behavior, and measured before/after recovery come after trustworthy classification. Docker-native evidence, local growth history, installation, and TUI polish follow that foundation.
+The next product layer is a reviewable cleanup plan with exact targets, reasons, application-aware operations, and revalidation. Explicit approval, matching dry-run behavior, and measured before/after recovery come after trustworthy classification. Docker-native evidence, installation, and TUI polish follow that foundation.
 
 See [the sprint plan](SPRINT-01.md) for the implementation scope and acceptance criteria.
+See [the growth-history sprint](SPRINT-02.md) for snapshot and comparison scope.
+
 ## Original project notes
 
 we are just getting started with this , shipping product soon
