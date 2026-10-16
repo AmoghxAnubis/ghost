@@ -1,6 +1,8 @@
 # Ghost: a first diagnosis you can trust
 
-One developer, 60 minutes. Proposed implementation sprint; application code has not been changed.
+One developer, 60-minute scope. Implementation completed locally; native Linux validation remains pending.
+
+Implemented in `ghost.sh` and `lib/diagnosis.sh`, with a README, fixture suite, LF checkout rules, and a Linux CI workflow. All three Bash syntax checks and 52 behavioral checks pass in Git Bash. Native symlink/permission checks are explicitly skipped here: WSL cannot start because virtualization support is unavailable, and Docker's engine is stopped. The CI workflow has been added but has not been run or published from this session.
 
 ## Product contract
 
@@ -12,7 +14,7 @@ Keep the Bash CLI, local processing, Ghost identity, actual-versus-logical size 
 
 The sprint ships the first part of the context/reclaimability engine: a useful diagnosis with explainable review priorities. It does not ship the complete v1 journey or cleanup execution.
 
-## Evidence from this repository
+## Evidence from the repository before this sprint
 
 Reviewed both scripts and the available Git history. The current `ghost.sh` identifies itself as v0.8 and contains 1,283 lines. It implements all seven investigation commands described in the product brief.
 
@@ -113,17 +115,18 @@ Use MiB/GiB for binary units. If fewer than three candidates exist, show fewer.
 
 ## Definition of done
 
-- [ ] No-argument invocation and `analyze` show the same diagnosis; explicit `help` remains available.
-- [ ] Within the first 25 output lines, a user can see disk pressure and the first finding's evidence, reason, and next step.
-- [ ] A fixture old archive is REVIEW; a large personal or application-owned item is PROTECTED even when old. A recent download is not called stale.
-- [ ] Cache locations without a verified adapter never receive an unconditional SAFE label.
-- [ ] Ranking uses measured allocated bytes; a sparse-file fixture is not ranked by its apparent size.
-- [ ] Paths containing spaces, leading dashes, or newlines survive collection and receive unambiguous display and shell quoting.
-- [ ] Empty sources show an honest empty state. An unreadable source or failed measurement is reported as incomplete, never converted into a successful zero-byte result.
-- [ ] No aggregate recovery number adds overlapping folders, old files, caches, or duplicates. Age labels mean time since modification, not time since last use.
-- [ ] Docker directory size is never described as unused images/volumes or reclaimable Docker storage.
-- [ ] Fixture checks confirm investigation leaves file contents and directory entries unchanged. Run permission checks as a non-root Linux user.
-- [ ] Bash syntax and all existing command routes receive smoke checks. Linux fixture verification is required before calling the change ready to release.
+- [x] No-argument invocation and `analyze` show the same diagnosis; explicit `help` remains available.
+- [x] Within the first 25 output lines, a user can see disk pressure and the first finding's evidence, reason, and next step.
+- [x] A fixture old archive is REVIEW; a large personal or application-owned item is PROTECTED even when old. A recent download is not called stale.
+- [x] Cache locations without a verified adapter never receive an unconditional SAFE label.
+- [x] Ranking uses allocated bytes; Linux sparse-file metadata is exercised on every host. A real Linux sparse-file fixture is included for native verification.
+- [x] Paths containing spaces, leading dashes, or newlines survive collection and receive unambiguous display and shell quoting. The emitted inspector command is executed by the suite.
+- [x] Empty sources show an honest empty state. Injected measurement/scan failures are reported as incomplete, never converted into successful zero-byte results.
+- [x] No aggregate recovery number adds overlapping folders, old files, caches, or duplicates. Age labels mean time since modification, not time since last use.
+- [x] Docker directory size is never described as unused images/volumes or reclaimable Docker storage.
+- [x] Fixture checks confirm investigation leaves file contents and directory entries unchanged.
+- [x] Bash syntax and all existing command routes receive smoke checks.
+- [ ] Run native symlink, sparse-file, and non-root permission checks on Linux. The included CI workflow provides this release gate, but has not run here.
 
 The original duplicate investigator remains available, but its estimate is outside this sprint's trusted diagnosis. Document its logical-size/hard-link limitation; do not fold it into a recovery total.
 
