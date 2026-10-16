@@ -19,8 +19,11 @@ jobs:
         run: |
           bash -n ghost.sh
           bash -n lib/diagnosis.sh
+          bash -n lib/history.sh
           bash -n tests/diagnosis_test.sh
+          bash -n tests/history_test.sh
       - name: Verify behavior as a non-root Linux user
         run: |
           test "$(id -u)" -ne 0
           bash tests/diagnosis_test.sh
+          bash tests/history_test.sh

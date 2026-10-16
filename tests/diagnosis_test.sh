@@ -155,7 +155,7 @@ snapshot > "$test_workspace/after"
 check 'diagnosis leaves contents and directory entries unchanged' cmp -s "$test_workspace/before" "$test_workspace/after"
 
 # Route smoke checks isolate dispatch from expensive legacy investigators.
-for route in scan large ghosts inspect duplicates age analyze help; do
+for route in scan large ghosts inspect duplicates age analyze snapshot changes help; do
     case "$route" in
         scan) handler=scan ;;
         large) handler=find_large_files ;;
@@ -164,6 +164,7 @@ for route in scan large ghosts inspect duplicates age analyze help; do
         duplicates) handler=find_duplicates ;;
         age) handler=find_old_files ;;
         analyze) handler=analyze ;;
+        snapshot|changes) handler=storage_history ;;
         help) handler=show_help ;;
     esac
     output=$( (eval "$handler() { printf 'dispatched'; }"; main "$route" "$DOWNLOADS_DIR") )

@@ -20,10 +20,27 @@ diagnosis_issue() {
     diagnosis_issues+=("$1")
 }
 
+# Shared locations keep diagnosis and history discovery in sync. Downloads has
+# its own bounded file collector; the remaining sources are whole directories.
+storage_source_catalog() {
+    storage_source_ids=(chrome_cache jetbrains_cache npm_cache app_local app_var docker_dir downloads)
+    storage_source_paths=("$CACHE_DIR/google-chrome" "$CACHE_DIR/JetBrains" "$NPM_DIR/_cacache"
+        "$LOCAL_DIR" "$VAR_DIR" "$DOCKER_DIR" "$DOWNLOADS_DIR")
+    storage_source_labels=('Chrome cache' 'JetBrains cache' 'npm cache' 'User application data'
+        'Application storage' 'Docker directory' 'Downloads (>10 MiB, top level)')
+    storage_source_kinds=(cache cache cache context context context downloads)
+    storage_source_evidence=('browser cache location; application state unknown'
+        'IDE cache location; application state unknown' 'npm content-cache location; application state unknown'
+        'application-managed data; directory measurement only' 'application-managed data; directory measurement only'
+        'Docker directory only; images/volumes and reclaimability unknown' 'top-level download files')
+}
+
 # Never follow an aliased source into personal or application-owned storage.
 # HOME itself may be a symlink; components below it must retain their location.
 diagnosis_source() {
     local path="$1" canonical expected
+    diagnosis_source_status=missing
+    diagnosis_source_path=''
     if [[ ! -e "$path" && ! -L "$path" ]]; then
         # A missing directory below an inaccessible parent is not a known zero.
         local parent="${path%/*}"
@@ -32,23 +49,29 @@ diagnosis_source() {
             [[ -n "$parent" ]] || parent=/
         done
         if [[ ! -r "$parent" || ! -x "$parent" ]]; then
+            diagnosis_source_status=unreadable
             diagnosis_issue "Cannot check source below an unreadable directory: $(printf '%q' "$path")"
         fi
         return 1
     fi
     if ! IFS= read -r -d '' canonical < <(realpath -ze -- "$path" 2>/dev/null); then
+        diagnosis_source_status=error
         diagnosis_issue "Cannot resolve source: $(printf '%q' "$path")"
         return 1
     fi
     expected="${diagnosis_physical_home%/}/${path#"$STORAGE_HOME"/}"
     if [[ "$canonical" != "$expected" || -L "$path" ]]; then
+        diagnosis_source_status=alias
         diagnosis_issue "PROTECTED alias skipped: $(printf '%q' "$path")"
         return 1
     fi
     if [[ ! -r "$path" || ( -d "$path" && ! -x "$path" ) ]]; then
+        diagnosis_source_status=unreadable
         diagnosis_issue "Unreadable source: $(printf '%q' "$path")"
         return 1
     fi
+    diagnosis_source_status=ok
+    diagnosis_source_path="$canonical"
 }
 
 # Positive evidence of ownership takes precedence over every candidate rule.
@@ -215,7 +238,8 @@ analyze() (
     trap 'exit 143' TERM
     local -a diagnosis_issues=() finding_paths=() finding_allocated=() finding_logical=()
     local -a finding_evidence=() finding_classes=() finding_reasons=() finding_inspect=()
-    local finding_class finding_reason
+    local -a storage_source_ids storage_source_paths storage_source_labels storage_source_kinds storage_source_evidence
+    local finding_class finding_reason diagnosis_source_status diagnosis_source_path source_index
     if ! IFS= read -r -d '' diagnosis_physical_home < <(realpath -ze -- "$STORAGE_HOME"); then
         echo 'Error: cannot resolve home directory.' >&2
         return 1
@@ -227,12 +251,11 @@ analyze() (
     echo
     # Progress belongs on interactive stderr, never in a captured report.
     [[ ! -t 2 ]] || printf 'Ghost: measuring known storage locations...\n' >&2
-    diagnosis_directory "$CACHE_DIR/google-chrome" cache 'browser cache location; application state unknown'
-    diagnosis_directory "$CACHE_DIR/JetBrains" cache 'IDE cache location; application state unknown'
-    diagnosis_directory "$NPM_DIR/_cacache" cache 'npm content-cache location; application state unknown'
-    diagnosis_directory "$LOCAL_DIR" context 'application-managed data; directory measurement only'
-    diagnosis_directory "$VAR_DIR" context 'application-managed data; directory measurement only'
-    diagnosis_directory "$DOCKER_DIR" context 'Docker directory only; images/volumes and reclaimability unknown'
+    storage_source_catalog
+    for ((source_index=0; source_index<${#storage_source_ids[@]}-1; source_index++)); do
+        diagnosis_directory "${storage_source_paths[$source_index]}" "${storage_source_kinds[$source_index]}" \
+            "${storage_source_evidence[$source_index]}"
+    done
     diagnosis_downloads
 
     local index rank=0 review_count=0 protected_count=0

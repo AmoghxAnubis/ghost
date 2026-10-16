@@ -3,7 +3,7 @@
 # ==========================================
 # GHOST
 # Disk Space Investigator
-# Version 0.9
+# Version 0.10
 # ==========================================
 
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
@@ -834,11 +834,12 @@ GHOST_SOURCE_DIR="${BASH_SOURCE[0]%/*}"
 [[ "$GHOST_SOURCE_DIR" != "${BASH_SOURCE[0]}" ]] || GHOST_SOURCE_DIR=.
 GHOST_SOURCE_DIR="$(cd -- "$GHOST_SOURCE_DIR" && pwd)"
 GHOST_SCRIPT_PATH="$GHOST_SOURCE_DIR/${BASH_SOURCE[0]##*/}"
-if [[ ! -r "$GHOST_SOURCE_DIR/lib/diagnosis.sh" ]]; then
+if [[ ! -r "$GHOST_SOURCE_DIR/lib/diagnosis.sh" || ! -r "$GHOST_SOURCE_DIR/lib/history.sh" ]]; then
     echo 'Error: keep ghost.sh and its lib/ directory together.' >&2
     return 1 2>/dev/null || exit 1
 fi
 source "$GHOST_SOURCE_DIR/lib/diagnosis.sh"
+source "$GHOST_SOURCE_DIR/lib/history.sh"
 
 # ==========================================
 # FULL SYSTEM SCAN
@@ -870,6 +871,8 @@ show_help() {
     echo "  duplicates        Find confirmed duplicate files"
     echo "  age [path]        Find large files older than 30 days"
     echo "  analyze           Explain storage pressure and rank review findings"
+    echo "  snapshot          Save a private local storage baseline"
+    echo "  changes [id]      Compare live storage with a saved baseline (default: latest)"
     echo "  help              Show this help message"
     echo
 }
@@ -923,6 +926,22 @@ main() {
 
         analyze)
             analyze
+            ;;
+
+        snapshot)
+            if (( $# != 1 )); then
+                echo 'Usage: bash ghost.sh snapshot' >&2
+                return 1
+            fi
+            storage_history snapshot
+            ;;
+
+        changes)
+            if (( $# > 2 )); then
+                echo 'Usage: bash ghost.sh changes [snapshot-id]' >&2
+                return 1
+            fi
+            storage_history changes "${2:-}"
             ;;
 
         help|-h|--help)

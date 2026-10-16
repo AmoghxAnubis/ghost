@@ -1,8 +1,8 @@
 # Ghost: a first diagnosis you can trust
 
-One developer, 60-minute scope. Implementation completed locally; native Linux validation remains pending.
+One developer, 60-minute scope. Implementation and the sprint's native Linux validation are complete.
 
-Implemented in `ghost.sh` and `lib/diagnosis.sh`, with a README, fixture suite, LF checkout rules, and a Linux CI workflow. All three Bash syntax checks and 52 behavioral checks pass in Git Bash. Native symlink/permission checks are explicitly skipped locally: WSL cannot start because virtualization support is unavailable, and Docker's engine is stopped. A concurrent push triggered the [first Linux workflow](https://github.com/AmoghxAnubis/ghost/actions/runs/38945490531), which passed syntax checks but exposed a test-fixture allocation assumption. That fixture has been corrected locally; a passing Linux rerun remains the release gate.
+Implemented in `ghost.sh` and `lib/diagnosis.sh`, with a README, fixture suite, LF checkout rules, and a Linux CI workflow. All three Bash syntax checks and 52 behavioral checks pass in Git Bash. The [Linux workflow for commit 6f0445d](https://github.com/AmoghxAnubis/ghost/actions/runs/38946194864) also passed all syntax checks and 55 behavioral checks as a non-root user, including native symlink and permission checks with a real sparse-file fixture. The initial test-fixture allocation assumption is corrected and verified. This completes the sprint's validation gate; the broader v1 roadmap remains separate.
 
 ## Product contract
 
@@ -126,7 +126,7 @@ Use MiB/GiB for binary units. If fewer than three candidates exist, show fewer.
 - [x] Docker directory size is never described as unused images/volumes or reclaimable Docker storage.
 - [x] Fixture checks confirm investigation leaves file contents and directory entries unchanged.
 - [x] Bash syntax and all existing command routes receive smoke checks.
-- [ ] Run native symlink, sparse-file, and non-root permission checks on Linux. The included CI workflow provides this release gate, but has not run here.
+- [x] Run native symlink, sparse-file, and non-root permission checks on Linux. Verified by the successful Linux workflow for commit `6f0445d`: 55 checks passed, with no native checks skipped.
 
 The original duplicate investigator remains available, but its estimate is outside this sprint's trusted diagnosis. Document its logical-size/hard-link limitation; do not fold it into a recovery total.
 
