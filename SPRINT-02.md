@@ -30,7 +30,15 @@ Snapshots measure sources sequentially; they are not filesystem-wide atomic snap
 
 The fixture suite exercises first use, multiple baselines, explicit older IDs, numeric ranking, measured growth/shrinkage, private files, no filename retention, no history feedback, source failures, missing sources, scope/device changes, corrupt snapshots, publication failure, safe path display, and unchanged application/download contents. Linux-only checks cover real sparse files, hard links, symlinks, and unreadable sources. Both suites are included in the Linux CI workflow.
 
-Final local and native Linux results are pending the final verification pass.
+Verified implementation commit: `f7bc3d5`.
+
+- All five Bash syntax checks passed.
+- Git Bash: 54 diagnosis/regression checks and 59 history checks passed (113 total). Native filesystem checks were explicitly skipped on this host.
+- [Linux CI](https://github.com/AmoghxAnubis/ghost/actions/runs/38951154304): 57 diagnosis/regression checks and 65 history checks passed (122 total), as a non-root user, with no native checks skipped.
+- Linux verified private directory/file/pointer permissions, refusal of publicly readable snapshots, real sparse files, hard-link deduplication, symlinked-source protection, and unreadable sources.
+- Existing command behavior and read-only diagnosis passed regression checks. The new route checks also verify snapshot/changes dispatch.
+
+This completes the sprint's implementation and validation scope. The first history CI run caught a dispatch-test assumption about extra arguments; the test was corrected to invoke `snapshot` with its actual argument contract, and the corrected implementation passed the full Linux workflow above.
 
 ## Later
 
