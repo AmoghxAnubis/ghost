@@ -1,0 +1,26 @@
+name: Ghost checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check Bash syntax
+        run: |
+          bash -n ghost.sh
+          bash -n lib/diagnosis.sh
+          bash -n tests/diagnosis_test.sh
+      - name: Verify behavior as a non-root Linux user
+        run: |
+          test "$(id -u)" -ne 0
+          bash tests/diagnosis_test.sh
