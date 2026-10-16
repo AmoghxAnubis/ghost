@@ -2,7 +2,7 @@
 
 One developer, 60-minute scope. Implementation completed locally; native Linux validation remains pending.
 
-Implemented in `ghost.sh` and `lib/diagnosis.sh`, with a README, fixture suite, LF checkout rules, and a Linux CI workflow. All three Bash syntax checks and 52 behavioral checks pass in Git Bash. Native symlink/permission checks are explicitly skipped here: WSL cannot start because virtualization support is unavailable, and Docker's engine is stopped. The CI workflow has been added but has not been run or published from this session.
+Implemented in `ghost.sh` and `lib/diagnosis.sh`, with a README, fixture suite, LF checkout rules, and a Linux CI workflow. All three Bash syntax checks and 52 behavioral checks pass in Git Bash. Native symlink/permission checks are explicitly skipped locally: WSL cannot start because virtualization support is unavailable, and Docker's engine is stopped. A concurrent push triggered the [first Linux workflow](https://github.com/AmoghxAnubis/ghost/actions/runs/38945490531), which passed syntax checks but exposed a test-fixture allocation assumption. That fixture has been corrected locally; a passing Linux rerun remains the release gate.
 
 ## Product contract
 

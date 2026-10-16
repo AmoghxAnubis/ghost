@@ -65,12 +65,13 @@ check 'binary units are correct' contains "$output" 'MiB on disk'
 check 'no unconditional safe finding' excludes "$output" 'SAFE  '
 check 'first screen includes an investigation step' contains "$(printf '%s\n' "$output" | head -n 25)" 'Investigate:'
 
-# Emulate Linux metadata for a mostly sparse file on every host. A huge logical
-# size with a 4 KiB allocation must sort below the real 11 MiB installer.
+# Emulate Linux metadata for a mostly sparse file on every host. Its 512 KiB
+# allocation is below the real installer and above the small cache fixtures,
+# so the logical-size explanation remains visible among the top three.
 sparse_output=$( (
     find() {
         command find "$@"
-        printf '%s\0%s\0%s\0%s\0' 943718400 8 "$(date -d '400 days ago' +%s).0" "$DOWNLOADS_DIR/sparse-metadata.iso"
+        printf '%s\0%s\0%s\0%s\0' 943718400 1024 "$(date -d '400 days ago' +%s).0" "$DOWNLOADS_DIR/sparse-metadata.iso"
     }
     main
 ) )
