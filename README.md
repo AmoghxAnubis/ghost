@@ -1,6 +1,6 @@
 # Ghost
 
-**Understand where your Linux storage went, why it is there, and what deserves review before cleanup.**
+**Understand where your Linux storage went, why it is there, and what deserves review before cleanup and removal.**
 
 Ghost is a privacy-first storage investigator for Linux developers, power users, and students. It runs locally in Bash, with no accounts, telemetry, cloud backend, or AI API.
 
